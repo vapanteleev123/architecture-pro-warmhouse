@@ -1,0 +1,72 @@
+@startuml C4_Containers_WarmHouse_ToBe
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Диаграмма контейнеров (C4 Containers) — To-Be: экосистема «Тёплый дом»
+
+Person(user, "Пользователь", "Владелец дома. Self-service: подключает модули, управляет устройствами, смотрит телеметрию и настраивает сценарии.")
+
+System_Boundary(ecosystem, "Экосистема «Тёплый дом»") {
+
+    Container(web, "Web Frontend", "SPA / Web UI", "Интерфейс самообслуживания SaaS")
+    Container(gateway, "API Gateway", "HTTP Gateway", "Единая точка входа: маршрутизация, auth-проксирование")
+
+    Container(userSvc, "user-service", "Go/Java", "Аккаунты, дома, доступ SaaS")
+    Container(deviceSvc, "device-service", "Go/Java", "Каталог устройств: регистрация, типы, статус, привязка к дому")
+    Container(heatingSvc, "heating-service", "Go/Java", "Команды и режимы отопления")
+    Container(lightingSvc, "lighting-service", "Go/Java", "Управление освещением")
+    Container(gateSvc, "gate-service", "Go/Java", "Управление автоматическими воротами")
+    Container(survSvc, "surveillance-service", "Go/Java", "Удалённое наблюдение за домом")
+    Container(teleSvc, "telemetry-service", "Go/Java", "Приём, хранение и отдача телеметрии")
+    Container(scenarioSvc, "scenario-service", "Go/Java", "Пользовательские сценарии автоматизации")
+    Container(adapter, "device-adapter", "Go/Java", "Интеграция с устройствами партнёров и неизвестными типами по стандартным протоколам")
+
+    ContainerQueue(broker, "Message Broker", "Kafka / RabbitMQ", "Асинхронные команды и события устройств/телеметрии")
+
+    ContainerDb(userDb, "user-db", "PostgreSQL", "Пользователи и дома")
+    ContainerDb(deviceDb, "device-db", "PostgreSQL", "Каталог устройств")
+    ContainerDb(heatingDb, "heating-db", "PostgreSQL", "Состояние отопления")
+    ContainerDb(lightingDb, "lighting-db", "PostgreSQL", "Состояние освещения")
+    ContainerDb(gateDb, "gate-db", "PostgreSQL", "Состояние ворот")
+    ContainerDb(survDb, "surveillance-db", "PostgreSQL", "Метаданные наблюдения / сессии")
+    ContainerDb(teleDb, "telemetry-db", "PostgreSQL", "Показания и история телеметрии")
+    ContainerDb(scenarioDb, "scenario-db", "PostgreSQL", "Правила сценариев")
+}
+
+System_Ext(devices, "Устройства партнёров", "Отопление, свет, ворота, камеры, будущие типы датчиков. Подключаются по интернету.")
+
+Rel(user, web, "Управляет домом, подключает модули", "HTTPS")
+Rel(web, gateway, "API-запросы", "HTTPS / REST")
+
+Rel(gateway, userSvc, "CRUD пользователей/домов", "REST")
+Rel(gateway, deviceSvc, "Регистрация и каталог устройств", "REST")
+Rel(gateway, heatingSvc, "Команды отопления", "REST")
+Rel(gateway, lightingSvc, "Команды света", "REST")
+Rel(gateway, gateSvc, "Команды ворот", "REST")
+Rel(gateway, survSvc, "Просмотр / сессии наблюдения", "REST")
+Rel(gateway, teleSvc, "Чтение телеметрии", "REST")
+Rel(gateway, scenarioSvc, "CRUD сценариев", "REST")
+
+Rel(userSvc, userDb, "Читает и пишет", "SQL")
+Rel(deviceSvc, deviceDb, "Читает и пишет", "SQL")
+Rel(heatingSvc, heatingDb, "Читает и пишет", "SQL")
+Rel(lightingSvc, lightingDb, "Читает и пишет", "SQL")
+Rel(gateSvc, gateDb, "Читает и пишет", "SQL")
+Rel(survSvc, survDb, "Читает и пишет", "SQL")
+Rel(teleSvc, teleDb, "Читает и пишет", "SQL")
+Rel(scenarioSvc, scenarioDb, "Читает и пишет", "SQL")
+
+Rel(deviceSvc, broker, "DeviceRegistered / DeviceUpdated", "Events")
+Rel(heatingSvc, broker, "HeatingCommandIssued / StatusChanged", "Events")
+Rel(lightingSvc, broker, "LightingCommandIssued", "Events")
+Rel(gateSvc, broker, "GateCommandIssued", "Events")
+Rel(survSvc, broker, "SurveillanceSessionEvents", "Events")
+Rel(scenarioSvc, broker, "Подписка на телеметрию, публикация команд", "Events")
+Rel(teleSvc, broker, "Подписка TelemetryReceived", "Events")
+Rel(adapter, broker, "Публикует телеметрию и статусы; потребляет команды", "Events")
+
+Rel(adapter, devices, "Команды и опрос / push-телеметрия", "MQTT / HTTPS")
+Rel(devices, adapter, "Показания и ack статусов", "MQTT / HTTPS")
+
+@enduml

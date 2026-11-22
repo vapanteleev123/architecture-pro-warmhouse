@@ -1,0 +1,29 @@
+@startuml C4_Components_device_adapter
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Components — device-adapter (Интеграция устройств партнёров)
+
+Container_Boundary(adapter, "device-adapter") {
+    Component(consumer, "Command Consumer", "Messaging", "Читает команды heating/lighting/gate/surveillance")
+    Component(translator, "Protocol Translator", "Anti-Corruption Layer", "Маппинг внутренних команд/событий ↔ протоколы партнёров")
+    Component(protocol, "Protocol Gateway", "MQTT / HTTPS", "Связь с физическими устройствами и неизвестными типами")
+    Component(ingest, "Telemetry Ingest", "Application", "Нормализация входящих показаний и ack-статусов")
+    Component(publisher, "Event Publisher", "Messaging", "TelemetryReceived, DeviceStatusChanged")
+}
+
+ContainerQueue(broker, "Message Broker", "Kafka / RabbitMQ", "Шина событий")
+System_Ext(devices, "Устройства партнёров", "Отопление, свет, ворота, камеры, future sensors")
+
+Rel(broker, consumer, "Command events")
+Rel(consumer, translator, "Внутренняя команда")
+Rel(translator, protocol, "Протокольное сообщение")
+Rel(protocol, devices, "MQTT / HTTPS")
+Rel(devices, protocol, "Показания / ack")
+Rel(protocol, ingest, "Сырые данные")
+Rel(ingest, translator, "Нормализация")
+Rel(ingest, publisher, "Доменные события")
+Rel(publisher, broker, "Events")
+
+@enduml

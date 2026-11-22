@@ -1,0 +1,31 @@
+@startuml C4_Components_telemetry_service
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Components — telemetry-service (Мониторинг / телеметрия)
+
+Container_Boundary(teleSvc, "telemetry-service") {
+    Component(api, "Telemetry API", "REST Controllers", "Текущие и исторические показания по device/location")
+    Component(ingest, "Ingest Handler", "Application", "Обработка входящих TelemetryReceived")
+    Component(query, "Query Handler", "Application", "Чтение актуальных и агрегированных данных")
+    Component(domain, "Telemetry Domain", "Domain Model", "Measurement, MetricType, TimeSeriesPoint")
+    Component(state, "Telemetry Store", "Repository", "Запись и выборка измерений")
+    Component(consumer, "Event Consumer", "Messaging", "Подписка на TelemetryReceived")
+}
+
+ContainerDb(teleDb, "telemetry-db", "PostgreSQL", "Показания телеметрии")
+ContainerQueue(broker, "Message Broker", "Kafka / RabbitMQ", "Шина событий")
+Container_Ext(gateway, "API Gateway", "Входной шлюз")
+
+Rel(gateway, api, "REST-запросы", "HTTPS")
+Rel(api, query, "Запросы чтения")
+Rel(query, domain, "Использует модель")
+Rel(query, state, "Читает")
+Rel(broker, consumer, "TelemetryReceived")
+Rel(consumer, ingest, "Передаёт событие")
+Rel(ingest, domain, "Валидирует")
+Rel(ingest, state, "Пишет")
+Rel(state, teleDb, "SQL")
+
+@enduml

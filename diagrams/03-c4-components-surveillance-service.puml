@@ -1,0 +1,30 @@
+@startuml C4_Components_surveillance_service
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Components — surveillance-service (Удалённое наблюдение)
+
+Container_Boundary(survSvc, "surveillance-service") {
+    Component(api, "Surveillance API", "REST Controllers", "Старт/стоп сессии просмотра, список камер")
+    Component(cmd, "Session Handler", "Application", "Управление сессиями удалённого наблюдения")
+    Component(domain, "Surveillance Domain", "Domain Model", "Camera, SurveillanceSession")
+    Component(state, "Session State Manager", "Repository", "Метаданные камер и активных сессий")
+    Component(publisher, "Event Publisher", "Messaging", "SurveillanceSessionStarted / Stopped")
+    Component(stream, "Stream Proxy", "Media Adapter", "Проксирование потока с device-adapter")
+}
+
+ContainerDb(survDb, "surveillance-db", "PostgreSQL", "Метаданные наблюдения")
+ContainerQueue(broker, "Message Broker", "Kafka / RabbitMQ", "Шина событий")
+Container_Ext(gateway, "API Gateway", "Входной шлюз")
+
+Rel(gateway, api, "REST-запросы", "HTTPS")
+Rel(api, cmd, "Делегирует")
+Rel(cmd, domain, "Использует модель")
+Rel(cmd, state, "Читает/пишет")
+Rel(state, survDb, "SQL")
+Rel(cmd, publisher, "События сессий")
+Rel(publisher, broker, "Events")
+Rel(cmd, stream, "Запрашивает поток")
+
+@enduml

@@ -1,0 +1,86 @@
+@startuml Code_Device_Classes
+title Code — Class: критичная модель device-service
+
+class DeviceService {
+  +registerDevice(cmd: RegisterDeviceCommand): Device
+  +updateDevice(id: UUID, cmd: UpdateDeviceCommand): Device
+  +unbindDevice(id: UUID): void
+  +getDevice(id: UUID): Device
+  +listByHome(homeId: UUID): List<Device>
+}
+
+class RegisterDeviceCommand {
+  +homeId: UUID
+  +name: String
+  +type: DeviceType
+  +location: String
+  +partnerProtocolId: String
+}
+
+class UpdateDeviceCommand {
+  +name: String
+  +location: String
+  +status: DeviceStatus
+}
+
+class Device {
+  +id: UUID
+  +homeId: UUID
+  +name: String
+  +type: DeviceType
+  +location: String
+  +status: DeviceStatus
+  +partnerProtocolId: String
+  +createdAt: DateTime
+  +updatedAt: DateTime
+  +activate(): void
+  +deactivate(): void
+  +markOffline(): void
+}
+
+enum DeviceType {
+  HEATING
+  TEMPERATURE_SENSOR
+  LIGHT
+  GATE
+  CAMERA
+  UNKNOWN
+}
+
+enum DeviceStatus {
+  PENDING
+  ACTIVE
+  INACTIVE
+  OFFLINE
+  ERROR
+}
+
+class Home {
+  +id: UUID
+  +ownerUserId: UUID
+  +address: String
+}
+
+interface DeviceRepository {
+  +save(device: Device): Device
+  +findById(id: UUID): Device
+  +findByHomeId(homeId: UUID): List<Device>
+  +delete(id: UUID): void
+}
+
+interface DeviceEventPublisher {
+  +publishRegistered(device: Device): void
+  +publishUpdated(device: Device): void
+  +publishRemoved(deviceId: UUID): void
+}
+
+DeviceService --> RegisterDeviceCommand : uses
+DeviceService --> UpdateDeviceCommand : uses
+DeviceService --> Device : creates/updates
+DeviceService --> DeviceRepository : persists
+DeviceService --> DeviceEventPublisher : emits
+Device --> DeviceType
+Device --> DeviceStatus
+Device --> Home : belongs to
+
+@enduml

@@ -1,0 +1,31 @@
+@startuml C4_Components_scenario_service
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Components — scenario-service (Сценарии автоматизации)
+
+Container_Boundary(scenarioSvc, "scenario-service") {
+    Component(api, "Scenario API", "REST Controllers", "CRUD сценариев пользователя")
+    Component(engine, "Rule Engine", "Application", "Оценка условий и запуск действий")
+    Component(domain, "Scenario Domain", "Domain Model", "Scenario, Trigger, Action")
+    Component(state, "Scenario Store", "Repository", "Правила и состояние сценариев")
+    Component(consumer, "Event Consumer", "Messaging", "Подписка на телеметрию и статусы")
+    Component(publisher, "Event Publisher", "Messaging", "Публикация команд в heating/lighting/gate")
+}
+
+ContainerDb(scenarioDb, "scenario-db", "PostgreSQL", "Правила сценариев")
+ContainerQueue(broker, "Message Broker", "Kafka / RabbitMQ", "Шина событий")
+Container_Ext(gateway, "API Gateway", "Входной шлюз")
+
+Rel(gateway, api, "REST-запросы", "HTTPS")
+Rel(api, engine, "Управление правилами / ручной запуск")
+Rel(engine, domain, "Использует модель")
+Rel(engine, state, "Читает/пишет")
+Rel(state, scenarioDb, "SQL")
+Rel(broker, consumer, "Telemetry / Status events")
+Rel(consumer, engine, "Передаёт события")
+Rel(engine, publisher, "Действия сценария")
+Rel(publisher, broker, "Command events")
+
+@enduml

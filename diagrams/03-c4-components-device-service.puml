@@ -1,0 +1,28 @@
+@startuml C4_Components_device_service
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Components — device-service (Управление устройствами)
+
+Container_Boundary(deviceSvc, "device-service") {
+    Component(api, "Device API", "REST Controllers", "HTTP: регистрация, список, обновление, удаление устройств")
+    Component(cmd, "Command Handler", "Application", "Сценарии: RegisterDevice, UpdateDevice, UnbindDevice")
+    Component(domain, "Device Domain", "Domain Model", "Device, DeviceType, DeviceStatus, привязка к Home")
+    Component(state, "Device State Manager", "Repository", "Персистентность каталога устройств")
+    Component(publisher, "Event Publisher", "Messaging", "Публикует DeviceRegistered / DeviceUpdated / DeviceRemoved")
+}
+
+ContainerDb(deviceDb, "device-db", "PostgreSQL", "Каталог устройств")
+ContainerQueue(broker, "Message Broker", "Kafka / RabbitMQ", "Шина событий")
+Container_Ext(gateway, "API Gateway", "Входной шлюз")
+
+Rel(gateway, api, "REST-запросы", "HTTPS")
+Rel(api, cmd, "Делегирует команды/запросы")
+Rel(cmd, domain, "Использует модель")
+Rel(cmd, state, "Читает/пишет состояние")
+Rel(state, deviceDb, "SQL")
+Rel(cmd, publisher, "Доменные события")
+Rel(publisher, broker, "Events")
+
+@enduml

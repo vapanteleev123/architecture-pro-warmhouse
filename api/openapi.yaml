@@ -1,0 +1,527 @@
+openapi: 3.0.3
+info:
+  title: Тёплый дом — REST API (синхронный контур)
+  description: |
+    Контракты синхронного REST API для ключевых микросервисов экосистемы «Тёплый дом».
+
+    Покрывает 5 эндпоинтов, необходимых для основных сценариев из C4 и ER-модели:
+
+    1. Регистрация устройства (`device-service`)
+    2. Получение информации об устройстве (`device-service`)
+    3. Обновление состояния устройства (`device-service`)
+    4. Отправка команды «включить отопление» (`heating-service`)
+    5. Получение последнего показания телеметрии (`telemetry-service`)
+
+    Клиент (Web / другие сервисы) обращается через API Gateway.
+    Асинхронный контур (команды к устройствам, телеметрия) описан отдельно в AsyncAPI.
+  version: 1.0.0
+  contact:
+    name: Architecture Team WarmHouse
+
+servers:
+  - url: https://api.warmhouse.local
+    description: API Gateway (единая точка входа)
+
+tags:
+  - name: Devices
+    description: Каталог и жизненный цикл устройств (device-service)
+  - name: Heating
+    description: Управление отоплением (heating-service)
+  - name: Telemetry
+    description: Чтение телеметрии (telemetry-service)
+
+paths:
+  /api/v1/devices:
+    post:
+      tags: [Devices]
+      summary: Регистрация устройства
+      description: |
+        Создаёт устройство в каталоге `device-service` и привязывает его к дому.
+        После успешной регистрации сервис публикует событие `DeviceRegistered`
+        в брокер (см. AsyncAPI) — heating/telemetry/adapter узнают о новом устройстве.
+      operationId: registerDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDeviceRequest'
+            examples:
+              heatingModule:
+                summary: Модуль отопления в гостиной
+                value:
+                  houseId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                  typeId: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                  moduleId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                  name: "Отопление гостиная"
+                  serialNumber: "HT-2026-00042"
+                  location: "Living Room"
+                  partnerProtocolId: "mqtt://partner/ht-0042"
+      responses:
+        '201':
+          description: Устройство создано
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+              examples:
+                created:
+                  summary: Успешная регистрация
+                  value:
+                    id: "550e8400-e29b-41d4-a716-446655440000"
+                    houseId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                    typeId: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                    moduleId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                    name: "Отопление гостиная"
+                    serialNumber: "HT-2026-00042"
+                    location: "Living Room"
+                    status: "pending"
+                    partnerProtocolId: "mqtt://partner/ht-0042"
+                    createdAt: "2026-11-22T17:30:00Z"
+                    updatedAt: "2026-11-22T17:30:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Устройство с таким serialNumber уже существует
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                conflict:
+                  value:
+                    code: "DEVICE_SERIAL_CONFLICT"
+                    message: "Device with serialNumber HT-2026-00042 already exists"
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/devices/{deviceId}:
+    get:
+      tags: [Devices]
+      summary: Получение информации об устройстве
+      description: |
+        Возвращает карточку устройства из каталога: тип, дом, локацию, статус.
+        Используется UI и доменными сервисами (heating, scenario) для проверки,
+        что устройство существует и принадлежит нужному дому/модулю.
+      operationId: getDevice
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '200':
+          description: Устройство найдено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+              examples:
+                activeHeating:
+                  summary: Активный модуль отопления
+                  value:
+                    id: "550e8400-e29b-41d4-a716-446655440000"
+                    houseId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                    typeId: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                    moduleId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                    name: "Отопление гостиная"
+                    serialNumber: "HT-2026-00042"
+                    location: "Living Room"
+                    status: "active"
+                    partnerProtocolId: "mqtt://partner/ht-0042"
+                    createdAt: "2026-11-22T17:30:00Z"
+                    updatedAt: "2026-11-22T18:00:00Z"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    patch:
+      tags: [Devices]
+      summary: Обновление состояния / атрибутов устройства
+      description: |
+        Частичное обновление устройства: имя, локация, статус каталога
+        (`pending` | `active` | `inactive` | `offline` | `error`).
+        После обновления публикуется `DeviceUpdated` в брокер.
+      operationId: updateDevice
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeviceRequest'
+            examples:
+              markActive:
+                summary: Активация после успешного подключения
+                value:
+                  status: "active"
+                  location: "Living Room"
+              markOffline:
+                summary: Устройство недоступно
+                value:
+                  status: "offline"
+      responses:
+        '200':
+          description: Устройство обновлено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+              examples:
+                updated:
+                  value:
+                    id: "550e8400-e29b-41d4-a716-446655440000"
+                    houseId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                    typeId: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                    moduleId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                    name: "Отопление гостиная"
+                    serialNumber: "HT-2026-00042"
+                    location: "Living Room"
+                    status: "active"
+                    partnerProtocolId: "mqtt://partner/ht-0042"
+                    createdAt: "2026-11-22T17:30:00Z"
+                    updatedAt: "2026-11-22T18:05:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/heating/{deviceId}/on:
+    post:
+      tags: [Heating]
+      summary: Команда «включить отопление»
+      description: |
+        Синхронный вход для пользователя: принимает команду и сразу отвечает,
+        что она принята к исполнению (`202 Accepted`).
+
+        Фактическое воздействие на физическое устройство выполняется асинхронно:
+        `heating-service` сохраняет целевое состояние в `heating-db` и публикует
+        `HeatingCommandIssued` в брокер → `device-adapter` доставляет команду устройству.
+
+        Согласовано с sequence-диаграммой Code (задание 2).
+      operationId: turnHeatingOn
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeatingCommandRequest'
+            examples:
+              defaultMode:
+                summary: Включение в режиме comfort
+                value:
+                  mode: "comfort"
+                  targetTemperature: 22.5
+      responses:
+        '202':
+          description: Команда принята и поставлена в очередь исполнения
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeatingCommandAccepted'
+              examples:
+                accepted:
+                  value:
+                    commandId: "9b2c1d0e-1111-2222-3333-444455556666"
+                    deviceId: "550e8400-e29b-41d4-a716-446655440000"
+                    action: "on"
+                    mode: "comfort"
+                    targetTemperature: 22.5
+                    status: "accepted"
+                    acceptedAt: "2026-11-22T18:10:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Устройство отопления не найдено / не относится к heating-модулю
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                notFound:
+                  value:
+                    code: "HEATING_DEVICE_NOT_FOUND"
+                    message: "Heating device 550e8400-e29b-41d4-a716-446655440000 not found"
+        '409':
+          description: Команда конфликтует с текущим состоянием (уже включено / offline)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                conflict:
+                  value:
+                    code: "HEATING_STATE_CONFLICT"
+                    message: "Device is offline; command cannot be accepted"
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/telemetry/devices/{deviceId}/latest:
+    get:
+      tags: [Telemetry]
+      summary: Последнее показание телеметрии устройства
+      description: |
+        Возвращает последнее сохранённое измерение для устройства
+        (например, температуру). Данные поступают в `telemetry-service`
+        асинхронно через событие `TelemetryReceived` (AsyncAPI).
+
+        Этот эндпоинт — синхронное чтение для UI / scenario-service:
+        «какая сейчас температура в комнате».
+      operationId: getLatestTelemetry
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+        - name: metricType
+          in: query
+          required: false
+          description: Тип метрики; по умолчанию `temperature`
+          schema:
+            type: string
+            enum: [temperature, humidity, power, gate_position, custom]
+            default: temperature
+          example: temperature
+      responses:
+        '200':
+          description: Последнее измерение найдено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryReading'
+              examples:
+                temperature:
+                  summary: Температура в гостиной
+                  value:
+                    id: 10482
+                    deviceId: "550e8400-e29b-41d4-a716-446655440000"
+                    metricType: "temperature"
+                    value: 21.7
+                    unit: "C"
+                    recordedAt: "2026-11-22T18:09:45Z"
+                    ingestedAt: "2026-11-22T18:09:46Z"
+        '404':
+          description: Устройство или измерения не найдены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                noData:
+                  value:
+                    code: "TELEMETRY_NOT_FOUND"
+                    message: "No telemetry for device 550e8400-e29b-41d4-a716-446655440000"
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  parameters:
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      description: UUID устройства
+      schema:
+        type: string
+        format: uuid
+      example: "550e8400-e29b-41d4-a716-446655440000"
+
+  schemas:
+    RegisterDeviceRequest:
+      type: object
+      required: [houseId, typeId, name, serialNumber]
+      properties:
+        houseId:
+          type: string
+          format: uuid
+          description: Дом, к которому привязывается устройство
+        typeId:
+          type: string
+          format: uuid
+          description: Ссылка на DeviceType из ER-модели
+        moduleId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Комплект SaaS-модуля (heating/lighting/...)
+        name:
+          type: string
+          maxLength: 100
+        serialNumber:
+          type: string
+          maxLength: 100
+        location:
+          type: string
+          maxLength: 100
+          description: Локация в доме (Living Room, Bedroom, Kitchen, ...)
+        partnerProtocolId:
+          type: string
+          maxLength: 100
+          description: Идентификатор во внешней/партнёрской шине (MQTT topic, device key)
+
+    UpdateDeviceRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        location:
+          type: string
+          maxLength: 100
+        status:
+          $ref: '#/components/schemas/DeviceStatus'
+
+    Device:
+      type: object
+      required: [id, houseId, typeId, name, serialNumber, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        houseId:
+          type: string
+          format: uuid
+        typeId:
+          type: string
+          format: uuid
+        moduleId:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+        serialNumber:
+          type: string
+        location:
+          type: string
+        status:
+          $ref: '#/components/schemas/DeviceStatus'
+        partnerProtocolId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    DeviceStatus:
+      type: string
+      description: Статус устройства в каталоге device-service
+      enum: [pending, active, inactive, offline, error]
+
+    HeatingCommandRequest:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [comfort, eco, frost_protection, manual]
+          default: comfort
+        targetTemperature:
+          type: number
+          format: double
+          minimum: 5
+          maximum: 35
+          description: Целевая температура (°C), если режим это поддерживает
+
+    HeatingCommandAccepted:
+      type: object
+      required: [commandId, deviceId, action, status, acceptedAt]
+      properties:
+        commandId:
+          type: string
+          format: uuid
+        deviceId:
+          type: string
+          format: uuid
+        action:
+          type: string
+          enum: [on]
+        mode:
+          type: string
+        targetTemperature:
+          type: number
+          format: double
+          nullable: true
+        status:
+          type: string
+          enum: [accepted]
+        acceptedAt:
+          type: string
+          format: date-time
+
+    TelemetryReading:
+      type: object
+      required: [id, deviceId, metricType, value, unit, recordedAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        deviceId:
+          type: string
+          format: uuid
+        metricType:
+          type: string
+          enum: [temperature, humidity, power, gate_position, custom]
+        value:
+          type: number
+          format: double
+        unit:
+          type: string
+          example: C
+        recordedAt:
+          type: string
+          format: date-time
+          description: Время измерения на стороне устройства
+        ingestedAt:
+          type: string
+          format: date-time
+          description: Время приёма в telemetry-service
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+  responses:
+    BadRequest:
+      description: Некорректный запрос (валидация)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            invalidBody:
+              value:
+                code: "VALIDATION_ERROR"
+                message: "Field 'houseId' is required"
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            missing:
+              value:
+                code: "NOT_FOUND"
+                message: "Resource not found"
+    InternalError:
+      description: Внутренняя ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            serverError:
+              value:
+                code: "INTERNAL_ERROR"
+                message: "Unexpected server error"
