@@ -1,0 +1,159 @@
+@startuml ER_WarmHouse_ToBe
+title ER-диаграмма экосистемы «Тёплый дом» (логическая модель)
+
+' Логическая модель предметной области.
+' Физически сущности распределяются по БД микросервисов (Database per Service):
+' user-db: User, House
+' device-db: Module, DeviceType, Device, HouseModule
+' telemetry-db: TelemetryData
+' scenario-db: Scenario, ScenarioTrigger, ScenarioAction
+' heating/lighting/gate/surveillance-db: специализированное состояние команд (не дублируем Device)
+
+entity "User" as user {
+  * **id** : UUID <<PK>>
+  --
+  * email : VARCHAR(255) <<UK>>
+  * password_hash : VARCHAR(255)
+  * full_name : VARCHAR(150)
+  * created_at : TIMESTAMPTZ
+  * updated_at : TIMESTAMPTZ
+}
+
+entity "House" as house {
+  * **id** : UUID <<PK>>
+  --
+  * **owner_user_id** : UUID <<FK>>
+  * name : VARCHAR(100)
+  * address : VARCHAR(255)
+  * timezone : VARCHAR(64)
+  * created_at : TIMESTAMPTZ
+}
+
+entity "Module" as module {
+  * **id** : UUID <<PK>>
+  --
+  * code : VARCHAR(50) <<UK>>
+  * name : VARCHAR(100)
+  * description : TEXT
+  * category : VARCHAR(50)
+  ' category: heating | lighting | gate | surveillance | sensor | other
+  * is_sellable_kit : BOOLEAN
+}
+
+entity "HouseModule" as house_module {
+  * **house_id** : UUID <<PK,FK>>
+  * **module_id** : UUID <<PK,FK>>
+  --
+  * status : VARCHAR(20)
+  ' status: selected | connected | disabled
+  * connected_at : TIMESTAMPTZ
+}
+
+entity "DeviceType" as device_type {
+  * **id** : UUID <<PK>>
+  --
+  * code : VARCHAR(50) <<UK>>
+  * name : VARCHAR(100)
+  * description : TEXT
+  * protocol : VARCHAR(50)
+  ' protocol: mqtt | https | proprietary | unknown
+  * **default_module_id** : UUID <<FK>> <<nullable>>
+}
+
+entity "Device" as device {
+  * **id** : UUID <<PK>>
+  --
+  * **type_id** : UUID <<FK>>
+  * **house_id** : UUID <<FK>>
+  * **module_id** : UUID <<FK>> <<nullable>>
+  * name : VARCHAR(100)
+  * serial_number : VARCHAR(100) <<UK>>
+  * location : VARCHAR(100)
+  * status : VARCHAR(20)
+  ' status: pending | active | inactive | offline | error | on | off
+  * partner_protocol_id : VARCHAR(100)
+  * created_at : TIMESTAMPTZ
+  * updated_at : TIMESTAMPTZ
+}
+
+entity "TelemetryData" as telemetry {
+  * **id** : BIGSERIAL <<PK>>
+  --
+  * **device_id** : UUID <<FK>>
+  * metric_type : VARCHAR(50)
+  ' metric_type: temperature | humidity | power | gate_position | custom
+  * value : DOUBLE
+  * unit : VARCHAR(20)
+  * recorded_at : TIMESTAMPTZ
+  * ingested_at : TIMESTAMPTZ
+}
+
+entity "Scenario" as scenario {
+  * **id** : UUID <<PK>>
+  --
+  * **house_id** : UUID <<FK>>
+  * **owner_user_id** : UUID <<FK>>
+  * name : VARCHAR(100)
+  * enabled : BOOLEAN
+  * created_at : TIMESTAMPTZ
+  * updated_at : TIMESTAMPTZ
+}
+
+entity "ScenarioTrigger" as scenario_trigger {
+  * **id** : UUID <<PK>>
+  --
+  * **scenario_id** : UUID <<FK>>
+  * **source_device_id** : UUID <<FK>> <<nullable>>
+  * metric_type : VARCHAR(50)
+  * operator : VARCHAR(10)
+  ' operator: lt | lte | gt | gte | eq
+  * threshold_value : DOUBLE
+}
+
+entity "ScenarioAction" as scenario_action {
+  * **id** : UUID <<PK>>
+  --
+  * **scenario_id** : UUID <<FK>>
+  * **target_device_id** : UUID <<FK>>
+  * action_type : VARCHAR(50)
+  ' action_type: turn_on | turn_off | set_mode | open | close
+  * action_payload : JSONB
+  * sort_order : INT
+}
+
+' --- Связи ---
+' User 1 — N House (владелец; по формулировке задания)
+user ||--o{ house : "owns"
+
+' House N — M Module через HouseModule (выбор комплектов SaaS)
+house ||--o{ house_module : "enables"
+module ||--o{ house_module : "installed_in"
+
+' Module 1 — N DeviceType (тип устройства относится к модулю-каталогу)
+module ||--o{ device_type : "includes"
+
+' House 1 — N Device
+house ||--o{ device : "contains"
+
+' DeviceType 1 — N Device
+device_type ||--o{ device : "classifies"
+
+' Module 1 — N Device (конкретный экземпляр из комплекта)
+module ||--o{ device : "instantiates"
+
+' Device 1 — N TelemetryData
+device ||--o{ telemetry : "generates"
+
+' House 1 — N Scenario; User 1 — N Scenario
+house ||--o{ scenario : "has"
+user ||--o{ scenario : "creates"
+
+' Scenario 1 — N Trigger / Action
+scenario ||--o{ scenario_trigger : "has"
+scenario ||--o{ scenario_action : "has"
+
+' Trigger/Action ссылаются на Device
+device ||--o{ scenario_trigger : "may_trigger"
+device ||--o{ scenario_action : "is_target"
+
+@enduml

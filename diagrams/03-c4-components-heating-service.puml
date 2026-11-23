@@ -1,0 +1,31 @@
+@startuml C4_Components_heating_service
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Components — heating-service (Управление отоплением)
+
+Container_Boundary(heatingSvc, "heating-service") {
+    Component(api, "Heating API", "REST Controllers", "Вкл/выкл отопления, смена режима")
+    Component(cmd, "Command Handler", "Application", "Сценарии управления отоплением")
+    Component(domain, "Heating Domain", "Domain Model", "HeatingZone, HeatingMode, CommandState")
+    Component(state, "Heating State Manager", "Repository", "Текущий режим и статус зон")
+    Component(publisher, "Event Publisher", "Messaging", "HeatingCommandIssued")
+    Component(consumer, "Event Consumer", "Messaging", "Подписка на DeviceStatusChanged / ack от adapter")
+}
+
+ContainerDb(heatingDb, "heating-db", "PostgreSQL", "Состояние отопления")
+ContainerQueue(broker, "Message Broker", "Kafka / RabbitMQ", "Шина событий")
+Container_Ext(gateway, "API Gateway", "Входной шлюз")
+
+Rel(gateway, api, "REST-запросы", "HTTPS")
+Rel(api, cmd, "Делегирует")
+Rel(cmd, domain, "Использует модель")
+Rel(cmd, state, "Читает/пишет")
+Rel(state, heatingDb, "SQL")
+Rel(cmd, publisher, "Публикует команды")
+Rel(publisher, broker, "Events")
+Rel(broker, consumer, "Status events")
+Rel(consumer, state, "Обновляет статус")
+
+@enduml

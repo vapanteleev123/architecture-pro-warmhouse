@@ -1,0 +1,37 @@
+@startuml Code_Heating_Command_Sequence
+title Code — Sequence: пользователь включает отопление
+
+actor User as user
+participant "Web Frontend" as web
+participant "API Gateway" as gw
+participant "heating-service" as heat
+database "heating-db" as hdb
+queue "Message Broker" as broker
+participant "device-adapter" as adapter
+participant "Устройство отопления" as device
+participant "telemetry-service" as tele
+
+user -> web: Нажать «Включить отопление»
+web -> gw: POST /api/v1/heating/{deviceId}/on
+gw -> heat: REST: TurnHeatingOn
+
+heat -> hdb: Сохранить команду / целевой режим
+hdb --> heat: OK
+heat -> broker: publish HeatingCommandIssued
+heat --> gw: 202 Accepted
+gw --> web: Accepted
+web --> user: Команда принята
+
+broker -> adapter: HeatingCommandIssued
+adapter -> device: Команда ON (MQTT/HTTPS)
+device --> adapter: Ack + новый статус
+adapter -> broker: publish DeviceStatusChanged
+adapter -> broker: publish TelemetryReceived
+
+broker -> heat: DeviceStatusChanged
+heat -> hdb: Обновить фактический статус
+
+broker -> tele: TelemetryReceived
+tele -> tele: Сохранить измерение
+
+@enduml

@@ -1,0 +1,305 @@
+asyncapi: 2.6.0
+info:
+  title: Тёплый дом — AsyncAPI (асинхронный контур)
+  version: 1.0.0
+  description: |
+    Контракты асинхронного взаимодействия микросервисов через Message Broker
+    (Kafka / RabbitMQ) в экосистеме «Тёплый дом».
+
+    Зачем AsyncAPI, а не только REST:
+    - команды к физическим устройствам не должны блокировать HTTP-запрос пользователя;
+    - телеметрия приходит потоком (push) от device-adapter — синхронный опрос не масштабируется;
+    - scenario-service и доменные сервисы подписываются на события без жёсткой связности.
+
+    Каналы ниже согласованы с C4 Containers и sequence «включить отопление».
+
+defaultContentType: application/json
+
+servers:
+  production:
+    url: broker.warmhouse.local:9092
+    protocol: kafka
+    description: Message Broker экосистемы (Kafka). Для RabbitMQ эквивалентные exchange/routing key.
+
+channels:
+  heating.commands:
+    description: |
+      Команды управления отоплением.
+      Publisher: heating-service
+      Consumer: device-adapter
+    publish:
+      operationId: publishHeatingCommandIssued
+      summary: heating-service публикует команду после HTTP 202
+      message:
+        $ref: '#/components/messages/HeatingCommandIssued'
+    subscribe:
+      operationId: consumeHeatingCommandIssued
+      summary: device-adapter получает команду и доставляет устройству
+      message:
+        $ref: '#/components/messages/HeatingCommandIssued'
+
+  telemetry.received:
+    description: |
+      Новое измерение с устройства (температура и др.).
+      Publisher: device-adapter
+      Consumer: telemetry-service, scenario-service
+    publish:
+      operationId: publishTelemetryReceived
+      summary: device-adapter публикует телеметрию после опроса/push от устройства
+      message:
+        $ref: '#/components/messages/TelemetryReceived'
+    subscribe:
+      operationId: consumeTelemetryReceived
+      summary: telemetry-service сохраняет измерение; scenario-service оценивает триггеры
+      message:
+        $ref: '#/components/messages/TelemetryReceived'
+
+  devices.status:
+    description: |
+      Изменение фактического статуса устройства (ack от железа / offline).
+      Publisher: device-adapter
+      Consumer: device-service, heating-service (и аналоги lighting/gate)
+    publish:
+      operationId: publishDeviceStatusChanged
+      summary: device-adapter сообщает новый статус после ack/timeout
+      message:
+        $ref: '#/components/messages/DeviceStatusChanged'
+    subscribe:
+      operationId: consumeDeviceStatusChanged
+      summary: доменные сервисы обновляют своё состояние
+      message:
+        $ref: '#/components/messages/DeviceStatusChanged'
+
+  devices.lifecycle:
+    description: |
+      Жизненный цикл каталога устройств.
+      Publisher: device-service
+      Consumer: heating-service, telemetry-service, scenario-service, device-adapter
+    publish:
+      operationId: publishDeviceRegistered
+      summary: устройство зарегистрировано в каталоге
+      message:
+        oneOf:
+          - $ref: '#/components/messages/DeviceRegistered'
+          - $ref: '#/components/messages/DeviceUpdated'
+    subscribe:
+      operationId: consumeDeviceLifecycle
+      summary: подписчики синхронизируют локальные представления / кэши
+      message:
+        oneOf:
+          - $ref: '#/components/messages/DeviceRegistered'
+          - $ref: '#/components/messages/DeviceUpdated'
+
+components:
+  messages:
+    HeatingCommandIssued:
+      name: HeatingCommandIssued
+      title: Команда отопления выдана
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/HeatingCommandIssuedPayload'
+      examples:
+        - name: turnOnComfort
+          summary: Включить отопление, режим comfort
+          payload:
+            eventId: "c0a80101-0000-4000-8000-000000000001"
+            eventType: "HeatingCommandIssued"
+            occurredAt: "2026-11-22T18:10:00Z"
+            commandId: "9b2c1d0e-1111-2222-3333-444455556666"
+            deviceId: "550e8400-e29b-41d4-a716-446655440000"
+            houseId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            action: "on"
+            mode: "comfort"
+            targetTemperature: 22.5
+
+    TelemetryReceived:
+      name: TelemetryReceived
+      title: Получено новое измерение
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/TelemetryReceivedPayload'
+      examples:
+        - name: temperatureReading
+          summary: Температура 21.7 °C
+          payload:
+            eventId: "c0a80101-0000-4000-8000-000000000002"
+            eventType: "TelemetryReceived"
+            occurredAt: "2026-11-22T18:09:46Z"
+            deviceId: "550e8400-e29b-41d4-a716-446655440000"
+            houseId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            metricType: "temperature"
+            value: 21.7
+            unit: "C"
+            recordedAt: "2026-11-22T18:09:45Z"
+
+    DeviceStatusChanged:
+      name: DeviceStatusChanged
+      title: Статус устройства изменился
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/DeviceStatusChangedPayload'
+      examples:
+        - name: heatingOnAck
+          summary: Устройство подтвердило включение
+          payload:
+            eventId: "c0a80101-0000-4000-8000-000000000003"
+            eventType: "DeviceStatusChanged"
+            occurredAt: "2026-11-22T18:10:02Z"
+            deviceId: "550e8400-e29b-41d4-a716-446655440000"
+            previousStatus: "active"
+            currentStatus: "on"
+            source: "device_ack"
+
+    DeviceRegistered:
+      name: DeviceRegistered
+      title: Устройство зарегистрировано
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/DeviceLifecyclePayload'
+      examples:
+        - name: registered
+          payload:
+            eventId: "c0a80101-0000-4000-8000-000000000004"
+            eventType: "DeviceRegistered"
+            occurredAt: "2026-11-22T17:30:00Z"
+            deviceId: "550e8400-e29b-41d4-a716-446655440000"
+            houseId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            typeId: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+            status: "pending"
+            serialNumber: "HT-2026-00042"
+
+    DeviceUpdated:
+      name: DeviceUpdated
+      title: Устройство обновлено в каталоге
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/DeviceLifecyclePayload'
+      examples:
+        - name: activated
+          payload:
+            eventId: "c0a80101-0000-4000-8000-000000000005"
+            eventType: "DeviceUpdated"
+            occurredAt: "2026-11-22T18:05:00Z"
+            deviceId: "550e8400-e29b-41d4-a716-446655440000"
+            houseId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            typeId: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+            status: "active"
+            serialNumber: "HT-2026-00042"
+
+  schemas:
+    HeatingCommandIssuedPayload:
+      type: object
+      required: [eventId, eventType, occurredAt, commandId, deviceId, houseId, action]
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          enum: [HeatingCommandIssued]
+        occurredAt:
+          type: string
+          format: date-time
+        commandId:
+          type: string
+          format: uuid
+        deviceId:
+          type: string
+          format: uuid
+        houseId:
+          type: string
+          format: uuid
+        action:
+          type: string
+          enum: [on, off, set_mode]
+        mode:
+          type: string
+          enum: [comfort, eco, frost_protection, manual]
+        targetTemperature:
+          type: number
+          format: double
+          nullable: true
+
+    TelemetryReceivedPayload:
+      type: object
+      required: [eventId, eventType, occurredAt, deviceId, metricType, value, unit, recordedAt]
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          enum: [TelemetryReceived]
+        occurredAt:
+          type: string
+          format: date-time
+        deviceId:
+          type: string
+          format: uuid
+        houseId:
+          type: string
+          format: uuid
+        metricType:
+          type: string
+          enum: [temperature, humidity, power, gate_position, custom]
+        value:
+          type: number
+          format: double
+        unit:
+          type: string
+        recordedAt:
+          type: string
+          format: date-time
+
+    DeviceStatusChangedPayload:
+      type: object
+      required: [eventId, eventType, occurredAt, deviceId, currentStatus, source]
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          enum: [DeviceStatusChanged]
+        occurredAt:
+          type: string
+          format: date-time
+        deviceId:
+          type: string
+          format: uuid
+        previousStatus:
+          type: string
+        currentStatus:
+          type: string
+          description: Фактический статус (on/off/offline/error/...)
+        source:
+          type: string
+          enum: [device_ack, timeout, adapter_probe]
+
+    DeviceLifecyclePayload:
+      type: object
+      required: [eventId, eventType, occurredAt, deviceId, houseId, status]
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          enum: [DeviceRegistered, DeviceUpdated]
+        occurredAt:
+          type: string
+          format: date-time
+        deviceId:
+          type: string
+          format: uuid
+        houseId:
+          type: string
+          format: uuid
+        typeId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, active, inactive, offline, error]
+        serialNumber:
+          type: string

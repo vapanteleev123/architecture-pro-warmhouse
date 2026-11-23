@@ -1,0 +1,26 @@
+@startuml C4_Components_user_service
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Components — user-service (Пользовательский доступ / SaaS)
+
+Container_Boundary(userSvc, "user-service") {
+    Component(api, "User API", "REST Controllers", "Регистрация, профиль, дома, права доступа")
+    Component(cmd, "Access Handler", "Application", "Self-service: создать дом, пригласить, выдать доступ к модулям")
+    Component(domain, "User Domain", "Domain Model", "User, Home, Membership, Role")
+    Component(state, "User State Manager", "Repository", "Персистентность пользователей и домов")
+    Component(auth, "Auth Component", "Security", "Аутентификация / проверка токенов для Gateway")
+}
+
+ContainerDb(userDb, "user-db", "PostgreSQL", "Пользователи и дома")
+Container_Ext(gateway, "API Gateway", "Входной шлюз")
+
+Rel(gateway, api, "REST-запросы", "HTTPS")
+Rel(api, cmd, "Делегирует")
+Rel(api, auth, "Проверяет доступ")
+Rel(cmd, domain, "Использует модель")
+Rel(cmd, state, "Читает/пишет")
+Rel(state, userDb, "SQL")
+
+@enduml
